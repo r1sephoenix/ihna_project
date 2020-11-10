@@ -1,2 +1,4 @@
-# ihna_project
+# IHNA project
 Project for classifcation mathematicians from non mathematicians
+
+
