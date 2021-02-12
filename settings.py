@@ -10,13 +10,17 @@ class EEGSettings:
     Settings for EEG postprocessing
 
     Constructor arguments:
+        path: path to folder with subjects EEG
         channels_to_drop: names of channels to drop
         montage_name: name of EEG equipment montage
         events: names of events
         fr_bands: frequency bands for obtaining features
         dict_cls: indexes for pairwise classification
+        files:
+        subj_indexes: indexes of all subjects
         mat_indexes: indexes of mat group subjects
         not_mat_indexes: indexes of not mat group subjects
+
     """
     channels_to_drop: List[str] = field(default_factory=lambda: ['E8', 'E14', 'E21', 'E25', 'E43', 'E48', 'E49', 'E56',
                                                                  'E57', 'E63', 'E64', 'E65', 'E68', 'E69', 'E73', 'E74',
