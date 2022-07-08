@@ -15,6 +15,6 @@ ihna_classification_mat_versus_hum_resting_state.ipynb
 3) Prediction of the age of children and adolescents based on ERPs upon presentation of stimuli
 of varying intensity\
 ihna_age_prediction.ipynb\
-Preliminary were presented on FENS 2022 (neurodevelopment section)\
+Preliminary results were presented on FENS 2022 (neurodevelopment section)\
 Poster Fens_2022_Mikheev.pdf
 
