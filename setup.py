@@ -7,6 +7,6 @@ setup(
     url='',
     license='',
     author='ilyamikheev',
-    author_email='obviousstandalonecomplex@gmail.com',
+    author_email=('obviousstandalonecomplex@gmail.com', 'imikheev@hse.ru'),
     description='Library for processing of EEG'
 )
