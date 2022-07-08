@@ -8,7 +8,7 @@ Tools for processing ERPs and oscillatory activity of EEG
 With the help of these tools, the following projects were carried out:
 
 <div align="center">
-Classification of tasks
+Classification of tasks using oscillatory activity
 </div>
 
 ![alt text](https://github.com/r1sephoenix/ihna_project/blob/95a3e7bb5d922e1e5580ec1e885a3e8fe5a3e206/Results_pictures/241_242_lr_mat.jpg?raw=true)
@@ -17,7 +17,7 @@ Classification of tasks
 Classification of mathematicians versus humanities
 </div>
 
-![alt text](https://github.com/r1sephoenix/ihna_project/blob/95a3e7bb5d922e1e5580ec1e885a3e8fe5a3e206/Results_pictures/241_242_lr_mat.jpg?raw=true)
+![alt text](https://github.com/r1sephoenix/ihna_project/blob/5639d2c69ce8c440fe278aa457b3842ac568a315/Results_pictures/mat_versus_hum.jpg?raw=true)
 
 1) Classification of mathematicians from the humanities based on the oscillatory activity of the EEG 
 when performing arithmetic and verbal tasks\
