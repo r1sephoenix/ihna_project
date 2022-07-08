@@ -204,12 +204,31 @@ def plot_clusters(data, cl_param):
     return fig
 
 
-def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name):
+def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot_all=True):
+    """
+
+    Parameters
+    ----------
+    tprs: list
+    aucs: list
+    list_predictions: list
+        predictions
+    list_y_true: list
+        true target values
+    method_name: str
+        name of ml algorithm
+    plot_all: bool
+        Plot or not to plot roc for each fold. Default True
+    Returns
+    -------
+    figure
+    """
     mean_fpr = np.linspace(0, 1, 100)
     fig, ax = plt.subplots(figsize=(12, 8))
-    for i, (y_true, pred) in enumerate(zip(list_y_true, list_predictions)):
-        RocCurveDisplay.from_predictions(y_true=y_true, y_pred=pred.tolist(), name=f"ROC fold {i + 1}", pos_label=0,
-                                         ax=ax)
+    if plot_all:
+        for i, (y_true, pred) in enumerate(zip(list_y_true, list_predictions)):
+            RocCurveDisplay.from_predictions(y_true=y_true, y_pred=pred.tolist(), name=f"ROC fold {i + 1}",
+                                             pos_label=0, ax=ax)
     ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=0.8, fontdict={'fontsize': 35})
     mean_tpr = np.mean(tprs, axis=0)
     mean_tpr[-1] = 1.0

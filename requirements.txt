@@ -1,0 +1,6 @@
+mne>=1.0.3
+numpy>=1.21.1
+lightgbm>=3.3.2
+matplotlib>=3.3.4
+scikit-learn>=1.0.2
+dataclasses>=0.8
