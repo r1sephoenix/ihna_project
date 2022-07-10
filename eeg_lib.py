@@ -45,8 +45,7 @@ def eeg_power_band(epochs_list, fr_bands):
     return fin_feat, fin_mean_spectra
 
 
-def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True,
-                   save_names='default'):
+def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, save_names='default'):
     """
 
     Parameters
@@ -74,44 +73,45 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
                          'ch_names')
     if save_names == 'default':
         save_dict = dict(
-            zip(['raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names'], ['epochs', 'spectra_feat', 'mean_spectra',
-                                                                               'chan_names']))
+            zip(['raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names'], ['raw_epochs', 'spectra_feat',
+                                                                               'mean_spectra', 'chan_names']))
     else:
         save_dict = save_names
-    subj_list_mean_spectra, subj_list_features, e_list, l_res, s, chan1 = [], [], [], [], 0, ['problem with raw data']
-    for subj_paths in settings.files.values():
+    subj_list_mean_spectra, subj_list_features, e_list, l_res, s, chan_names = [], [], [], [], 0, None
+    for subj_paths, s_ind in zip(settings.files.values(), settings.files.keys()):
         paths, epochs_list = subj_paths, []
         for event_ind in settings.events:
             j = 0
             epochs = None
             for i in [x for x in paths if '{0}'.format(event_ind) in x]:
                 event_id = dict(a=event_ind)
-                raw = mne.io.read_raw_edf(i)
+                raw = mne.io.read_raw_edf(i, verbose='ERROR')
                 if len(raw.times) // 500 < 10:
                     continue
                 new_events = mne.make_fixed_length_events(raw, id=event_ind, start=5, duration=2, overlap=0)
                 if j == 1:
                     epochs = mne.concatenate_epochs([mne.Epochs(raw, new_events, event_id=event_id, tmin=0,
                                                                 tmax=2, baseline=None, flat=dict(eeg=1e-20),
-                                                                preload=True), epochs])
+                                                                preload=True, verbose='ERROR'), epochs],
+                                                    verbose='ERROR')
                 else:
                     epochs = mne.Epochs(raw, new_events, event_id=event_id, tmin=0, tmax=2, baseline=None,
-                                        flat=dict(eeg=1e-20), preload=True)
+                                        flat=dict(eeg=1e-20), preload=True, verbose='ERROR')
                     j += 1
             if epochs is not None:
                 epochs_list.append(epochs.copy())
+        if not epochs_list:
+            raise ValueError(f'{s_ind} subject data is too short to be processed. please check files manually')
         for epoch in range(len(epochs_list)):
             new_names = dict(
                 (ch_name,
                  ch_name.replace('-', '').replace('Chan ', 'E').replace('CAR', '').replace('EEG ', '')
                  .replace('CA', '').replace(' ', ''))
                 for ch_name in epochs_list[epoch].ch_names)
-            epochs_list[epoch].rename_channels(new_names).set_montage(montage).drop_channels(settings.channels_to_drop)
+            epochs_list[epoch].rename_channels(new_names, verbose='ERROR').set_montage(montage, verbose='ERROR'). \
+                drop_channels(settings.channels_to_drop, verbose='ERROR')
             if s == 0:
-                chan1 = epochs_list[0].ch_names
-                if save:
-                    with open(f'preprocessed_data/{save_dict["chan_names"]}.pkl', 'wb') as chan_names_file:
-                        pickle.dump(e_list, chan_names_file)
+                chan_names = epochs_list[0].ch_names
                 s += 1
         if 'raw_epochs' in res:
             e_list.append(epochs_list)
@@ -122,22 +122,18 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
     res_names = list(res)
     if 'raw_epochs' in res:
         l_res.append(e_list)
-        if save:
-            with open(f'preprocessed_data/{save_dict["raw_epochs"]}.pkl', 'wb') as raw_epochs_file:
-                pickle.dump(e_list, raw_epochs_file)
     if 'spectra_feat' in res:
         spectra_feat = [[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
                         for i in range(len(settings.files))]
-        l_res.append(spectra_feat)
-        if save:
-            with open(f'preprocessed_data/{save_dict["spectra_feat"]}.pkl', 'wb') as spectra_file:
-                pickle.dump(spectra_feat, spectra_file)
+        l_res.extend([spectra_feat, np.stack(subj_list_mean_spectra)])
         res_names.append('mean_spectra')
-        l_res.append(np.stack(subj_list_mean_spectra))
-        if save:
-            with open(f'preprocessed_data/{save_dict["mean_spectra"]}.pkl', 'wb') as mean_spectra_file:
-                pickle.dump(e_list, mean_spectra_file)
-    data = dict(zip(res_names + ['chan_names'], l_res + [chan1]))
+    res_names.append('chan_names')
+    l_res.append(chan_names)
+    if save:
+        for r, name in zip(l_res, list(save_dict.values())):
+            with open(f'preprocessed_data/{name}.pkl', 'wb') as file:
+                pickle.dump(r, file)
+    data = dict(zip(res_names, l_res))
     return data
 
 
