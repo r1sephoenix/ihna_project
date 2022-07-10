@@ -1,9 +1,6 @@
-import datetime as dt
-import os
-
+import pickle
 import mne
 import numpy as np
-import pickle
 from lightgbm import LGBMClassifier
 from matplotlib import pyplot as plt, cm
 from mne.decoding import LinearModel, get_coef
@@ -60,7 +57,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         save on disc option
     ret: bool
         option to return values
-    save_names: dict
+    save_names: str or dict
         names of files
 
     Returns
@@ -142,8 +139,24 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         return dict(zip(res_names, l_res))
 
 
-def load_data():
-    pass
+def load_data(load_names):
+    """
+
+    Parameters
+    ----------
+    load_names: list
+        names of files to load
+
+    Returns
+    -------
+    dict
+        dictionary with files
+    """
+    result = dict()
+    for name in load_names:
+        with open(f'{name}.pkl', 'rb') as file:
+            result[name] = pickle.load(file)
+    return result
 
 
 def predict_lm(data, eeg_param):
@@ -348,19 +361,5 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
     return fig
 
 
-def create_results_folder(path_res='/Users/ilamiheev/Downloads/results_ihna'):
-    """
-    function that creates new folder
-    Parameters
-    ----------
-    path_res: str
-        path for new folder
-    """
-    path_res = path_res + f'{dt.datetime.now().strftime("%m%d%H:%M:%S")}'
-    path_subj = os.path.join(path_res, 'subjects_classification')
-    path_unite_subj = os.path.join(path_res, 'unite_subjects')
-    path_unite_topo = os.path.join(path_unite_subj, 'unite_topo')
-    path_group = os.path.join(path_res, 'group_classification')
-    path_group_topo = os.path.join(path_group, 'group_topo')
-    for path in [path_res, path_subj, path_unite_subj, path_unite_topo, path_group, path_group_topo]:
-        os.makedirs(path)
+def merge_fig():
+    pass
