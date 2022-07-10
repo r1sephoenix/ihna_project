@@ -3,6 +3,7 @@ import os
 
 import mne
 import numpy as np
+import pickle
 from lightgbm import LGBMClassifier
 from matplotlib import pyplot as plt, cm
 from mne.decoding import LinearModel, get_coef
@@ -26,38 +27,58 @@ def eeg_power_band(epochs_list, fr_bands):
     tuple
         (features for models, features for stat tests)
     """
-    fin_table, fin_feat = [], []
+    fin_mean_spectra, fin_feat = [], []
     for ind in range(len(epochs_list)):
         psds, freqs = psd_multitaper(epochs_list[ind])
-        psds_table = np.mean(psds, axis=0)
+        psds_mean_spectra = np.mean(psds, axis=0)
         psds /= psds.sum(axis=-1)[..., None]
-        psds_table /= psds_table.sum(axis=-1)[..., None]
-        psd_bands_table_list, psd_bands_features_list = [], []
+        psds_mean_spectra /= psds_mean_spectra.sum(axis=-1)[..., None]
+        psd_bands_mean_spectra_list, psd_bands_features_list = [], []
         for fmin, fmax in fr_bands.values():
             freq_mask = (fmin < freqs) & (freqs < fmax)
-            data_table, data_feat = psds_table[..., freq_mask].mean(axis=-1), psds[..., freq_mask].mean(axis=-1)
+            data_mean_spectra, data_feat = psds_mean_spectra[..., freq_mask].mean(axis=-1), psds[..., freq_mask]. \
+                mean(axis=-1)
             psd_bands_features_list.append(data_feat)
-            psd_bands_table_list.append(data_table)
-        fin_table.append(psd_bands_table_list)
+            psd_bands_mean_spectra_list.append(data_mean_spectra)
+        fin_mean_spectra.append(psd_bands_mean_spectra_list)
         fin_feat.append(psd_bands_features_list)
-    return fin_feat, fin_table
+    return fin_feat, fin_mean_spectra
 
 
-def create_dataset(settings, montage, res=('raw', 'sp_f')):
+def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True,
+                   save_names='default'):
     """
 
     Parameters
     ----------
-    settings:  EEGSettings
+    settings: EEGSettings
+        settings
     montage: montage
+        EEG montage
     res: tuple
+        specify raw epochs/spectra features or both. for saving on disc choose default value
+    save: bool
+        save on disc option
+    save_names: dict
+        names of files
 
     Returns
     -------
     dict
-        ('raw', 'sp_f', 'table', 'n_chan')
+        ('raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names')
     """
-    subj_list_table, subj_list_features, e_list, l_res, s, chan1 = [], [], [], [], 0, ['problem with raw data']
+    if len(res) != 2 and save:
+        raise ValueError('Please, use default res attribute')
+    if len(save_names) != 4 and save:
+        raise ValueError('Please, specify all files names - for epochs, spectra features, mean spectra features and '
+                         'ch_names')
+    if save_names == 'default':
+        save_dict = dict(
+            zip(['raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names'], ['epochs', 'spectra_feat', 'mean_spectra',
+                                                                               'chan_names']))
+    else:
+        save_dict = save_names
+    subj_list_mean_spectra, subj_list_features, e_list, l_res, s, chan1 = [], [], [], [], 0, ['problem with raw data']
     for subj_paths in settings.files.values():
         paths, epochs_list = subj_paths, []
         for event_ind in settings.events:
@@ -88,23 +109,35 @@ def create_dataset(settings, montage, res=('raw', 'sp_f')):
             epochs_list[epoch].rename_channels(new_names).set_montage(montage).drop_channels(settings.channels_to_drop)
             if s == 0:
                 chan1 = epochs_list[0].ch_names
+                if save:
+                    with open(f'preprocessed_data/{save_dict["chan_names"]}.pkl', 'wb') as chan_names_file:
+                        pickle.dump(e_list, chan_names_file)
                 s += 1
-        if 'raw' in res:
+        if 'raw_epochs' in res:
             e_list.append(epochs_list)
-        if 'sp_f' in res:
+        if 'spectra_feat' in res:
             feat_list, tabl_list = eeg_power_band(epochs_list, settings.fr_bands)
-            subj_list_table.append(tabl_list)
+            subj_list_mean_spectra.append(tabl_list)
             subj_list_features.append(feat_list)
     res_names = list(res)
-    if 'raw' in res:
+    if 'raw_epochs' in res:
         l_res.append(e_list)
-    if 'sp_f' in res:
-        l_res.append('')
-        l_res.append([[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
-                      for i in range(len(settings.files))])
-        res_names.append('table')
-        l_res.append(np.stack(subj_list_table))
-    data = dict(zip(res_names + ['n_chan'], l_res + [chan1]))
+        if save:
+            with open(f'preprocessed_data/{save_dict["raw_epochs"]}.pkl', 'wb') as raw_epochs_file:
+                pickle.dump(e_list, raw_epochs_file)
+    if 'spectra_feat' in res:
+        spectra_feat = [[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
+                        for i in range(len(settings.files))]
+        l_res.append(spectra_feat)
+        if save:
+            with open(f'preprocessed_data/{save_dict["spectra_feat"]}.pkl', 'wb') as spectra_file:
+                pickle.dump(spectra_feat, spectra_file)
+        res_names.append('mean_spectra')
+        l_res.append(np.stack(subj_list_mean_spectra))
+        if save:
+            with open(f'preprocessed_data/{save_dict["mean_spectra"]}.pkl', 'wb') as mean_spectra_file:
+                pickle.dump(e_list, mean_spectra_file)
+    data = dict(zip(res_names + ['chan_names'], l_res + [chan1]))
     return data
 
 
