@@ -22,8 +22,8 @@ def eeg_power_band(epochs_list, fr_bands):
 
     Returns
     -------
-    :rtype:tuple
-    :return:(features for models, features for stat tests)
+    :rtype: tuple
+    :return: features for models, features for stat tests
     """
     fin_mean_spectra, fin_feat = [], []
     for ind in range(len(epochs_list)):
@@ -63,8 +63,8 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
 
     Returns
     -------
-    :rtype:dict
-    :return:only if argument ret is True. Return dict with keys in ('raw_epochs', 'spectra_feat', 'mean_spectra',
+    :rtype: dict
+    :return: only if argument ret is True. Return dict with keys in ('raw_epochs', 'spectra_feat', 'mean_spectra',
     'chan_names')
     """
     if len(res) != 2 and save:
@@ -152,8 +152,8 @@ def load_data(load_names):
 
     Returns
     -------
-    :rtype:dict
-    :return:dictionary with files
+    :rtype: dict
+    :return: dictionary with files
     """
     result = dict()
     for name in tqdm(load_names, desc='Loading of files', total=len(load_names)):
@@ -167,17 +167,17 @@ def predict_lm(data, eeg_param):
     function for logistic regression model
     Parameters
     ----------
-    data: tuple
-    eeg_param: tuple
-       (fr_bands, n_channels)
+    data: list[np.ndarray]
+    eeg_param: list[dict, list]
+       [fr_bands, channels_names]
     
     Returns
     -------
-    :rtype:tuple
-    :return:(ac, roc_auc, interp_tpr, coefs)
+    :rtype: tuple
+    :return: ac, roc_auc, interp_tpr, coefs
     """
     mean_fpr = np.linspace(0, 1, 100)
-    coefs = np.zeros((2, len(eeg_param[0]), eeg_param[1]))
+    coefs = np.zeros((2, len(eeg_param[0]), len(eeg_param[1])))
     model = make_pipeline(StandardScaler(),
                           LinearModel(LogisticRegressionCV(Cs=list(np.power(10.0, np.arange(-10, 10))), penalty='l2',
                                                            scoring='roc_auc', random_state=0, max_iter=10000,
@@ -200,13 +200,13 @@ def predict_lgbm(data, eeg_param):
     function for LightGBM model
     Parameters
     ----------
-    data: tuple
-    eeg_param: tuple
-        (fr_bands, n_channels)
+    data: list[np.ndarray]
+    eeg_param: list[dict, list]
+        [fr_bands, channels_names]
     Returns
     -------   
-    :rtype:tuple
-    :return:(ac, roc_auc, interp_tpr, feature_importances)
+    :rtype: tuple
+    :return: ac, roc_auc, interp_tpr, feature_importances
     """
     mean_fpr = np.linspace(0, 1, 100)
     model = LGBMClassifier(objective='binary')
