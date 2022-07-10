@@ -54,5 +54,5 @@ class EEGSettings:
         indexes = [re.search('(.+?)_', file_name).group(1) for file_name in paths_to_subjects]
         self.not_mat_indexes = [x for x in indexes if x not in self.mat_indexes]
         self.order_indexes = self.mat_indexes + self.not_mat_indexes
-        paths_to_edf = [glob.glob(path + '/{0}/Reals/*.edf'.format(file_name)) for file_name in paths_to_subjects]
+        paths_to_edf = [glob.glob(path + f'/{file_name}/Reals/*.edf') for file_name in paths_to_subjects]
         self.files = {key: value for key, value in zip(indexes, paths_to_edf)}

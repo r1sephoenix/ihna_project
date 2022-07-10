@@ -43,6 +43,71 @@ def eeg_power_band(epochs_list, fr_bands):
     return fin_feat, fin_table
 
 
+def create_dataset(settings, montage, res=('raw', 'sp_f')):
+    """
+
+    Parameters
+    ----------
+    settings:  EEGSettings
+    montage: montage
+    res: tuple
+
+    Returns
+    -------
+    dict
+        ('raw', 'sp_f', 'table', 'n_chan')
+    """
+    subj_list_table, subj_list_features, e_list, l_res, s, chan1 = [], [], [], [], 0, ['problem with raw data']
+    for subj_paths in settings.files.values():
+        paths, epochs_list = subj_paths, []
+        for event_ind in settings.events:
+            j = 0
+            epochs = None
+            for i in [x for x in paths if '{0}'.format(event_ind) in x]:
+                event_id = dict(a=event_ind)
+                raw = mne.io.read_raw_edf(i)
+                if len(raw.times) // 500 < 10:
+                    continue
+                new_events = mne.make_fixed_length_events(raw, id=event_ind, start=5, duration=2, overlap=0)
+                if j == 1:
+                    epochs = mne.concatenate_epochs([mne.Epochs(raw, new_events, event_id=event_id, tmin=0,
+                                                                tmax=2, baseline=None, flat=dict(eeg=1e-20),
+                                                                preload=True), epochs])
+                else:
+                    epochs = mne.Epochs(raw, new_events, event_id=event_id, tmin=0, tmax=2, baseline=None,
+                                        flat=dict(eeg=1e-20), preload=True)
+                    j += 1
+            if epochs is not None:
+                epochs_list.append(epochs.copy())
+        for epoch in range(len(epochs_list)):
+            new_names = dict(
+                (ch_name,
+                 ch_name.replace('-', '').replace('Chan ', 'E').replace('CAR', '').replace('EEG ', '')
+                 .replace('CA', '').replace(' ', ''))
+                for ch_name in epochs_list[epoch].ch_names)
+            epochs_list[epoch].rename_channels(new_names).set_montage(montage).drop_channels(settings.channels_to_drop)
+            if s == 0:
+                chan1 = epochs_list[0].ch_names
+                s += 1
+        if 'raw' in res:
+            e_list.append(epochs_list)
+        if 'sp_f' in res:
+            feat_list, tabl_list = eeg_power_band(epochs_list, settings.fr_bands)
+            subj_list_table.append(tabl_list)
+            subj_list_features.append(feat_list)
+    res_names = list(res)
+    if 'raw' in res:
+        l_res.append(e_list)
+    if 'sp_f' in res:
+        l_res.append('')
+        l_res.append([[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
+                      for i in range(len(settings.files))])
+        res_names.append('table')
+        l_res.append(np.stack(subj_list_table))
+    data = dict(zip(res_names + ['n_chan'], l_res + [chan1]))
+    return data
+
+
 def predict_lm(data, eeg_param):
     """
     function for logistic regression model
