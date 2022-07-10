@@ -157,7 +157,7 @@ def load_data(load_names):
     """
     result = dict()
     for name in tqdm(load_names, desc='Loading of files', total=len(load_names)):
-        with open(f'{name}.pkl', 'rb') as file:
+        with open(f'preprocessed_data/{name}.pkl', 'rb') as file:
             result[name] = pickle.load(file)
     return result
 
