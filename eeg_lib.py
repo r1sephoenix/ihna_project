@@ -9,6 +9,7 @@ from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import balanced_accuracy_score, roc_curve, auc, RocCurveDisplay
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 
 def eeg_power_band(epochs_list, fr_bands):
@@ -21,12 +22,12 @@ def eeg_power_band(epochs_list, fr_bands):
 
     Returns
     -------
-    tuple
-        (features for models, features for stat tests)
+    :rtype:tuple
+    :return:(features for models, features for stat tests)
     """
     fin_mean_spectra, fin_feat = [], []
     for ind in range(len(epochs_list)):
-        psds, freqs = psd_multitaper(epochs_list[ind])
+        psds, freqs = psd_multitaper(epochs_list[ind], verbose=False)
         psds_mean_spectra = np.mean(psds, axis=0)
         psds /= psds.sum(axis=-1)[..., None]
         psds_mean_spectra /= psds_mean_spectra.sum(axis=-1)[..., None]
@@ -44,14 +45,14 @@ def eeg_power_band(epochs_list, fr_bands):
 
 def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default'):
     """
-
+    function for dataset creation
     Parameters
     ----------
     settings: EEGSettings
         settings
     montage: montage
         EEG montage
-    res: tuple
+    res: tuple[str]
         specify raw epochs/spectra features or both. for saving on disc choose default value
     save: bool
         save on disc option
@@ -62,13 +63,13 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
 
     Returns
     -------
-    dict
-        only if argument ret is True. Return dict with keys in ('raw_epochs', 'spectra_feat', 'mean_spectra',
-         'chan_names')
+    :rtype:dict
+    :return:only if argument ret is True. Return dict with keys in ('raw_epochs', 'spectra_feat', 'mean_spectra',
+    'chan_names')
     """
     if len(res) != 2 and save:
         raise ValueError('Please, use default res attribute')
-    if len(save_names) != 4 and save:
+    if save_names != 'default' and len(save_names) != 4 and save:
         raise ValueError('Please, specify all files names - for epochs, spectra features, mean spectra features and '
                          'ch_names')
     if save_names == 'default':
@@ -79,7 +80,9 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         save_dict = save_names
     subj_list_mean_spectra, subj_list_features, e_list, l_res, res_names, s, chan_names, info = \
         [], [], [], [], [], 0, None, None
-    for subj_paths, s_ind in zip(settings.files.values(), settings.files.keys()):
+    n_subj = len(settings.files)
+    for subj_paths, s_ind in tqdm(zip(settings.files.values(), settings.files.keys()), total=n_subj,
+                                  desc=f'Creation of dataset for{n_subj}', position=0):
         paths, epochs_list = subj_paths, []
         for event_ind in settings.events:
             j = 0
@@ -110,7 +113,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
                  .replace('CA', '').replace(' ', ''))
                 for ch_name in epochs_list[epoch].ch_names)
             epochs_list[epoch].rename_channels(new_names, verbose='ERROR').set_montage(montage, verbose='ERROR'). \
-                drop_channels(settings.channels_to_drop, verbose='ERROR')
+                drop_channels(settings.channels_to_drop)
             if s == 0:
                 chan_names = epochs_list[0].ch_names
                 info = mne.create_info(epochs_list[0].info.ch_names, ch_types='eeg', sfreq=250).set_montage(montage)
@@ -132,7 +135,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
     res_names.extend(['chan_names', 'info_object'])
     l_res.extend([chan_names, info])
     if save:
-        for r, name in zip(l_res, list(save_dict.values())):
+        for r, name in tqdm(zip(l_res, list(save_dict.values())), total=len(save_dict), desc=f'Saving'):
             with open(f'preprocessed_data/{name}.pkl', 'wb') as file:
                 pickle.dump(r, file)
     if ret:
@@ -141,19 +144,19 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
 
 def load_data(load_names):
     """
-
+    function for load files
     Parameters
     ----------
-    load_names: list
+    load_names: list[str]
         names of files to load
 
     Returns
     -------
-    dict
-        dictionary with files
+    :rtype:dict
+    :return:dictionary with files
     """
     result = dict()
-    for name in load_names:
+    for name in tqdm(load_names, desc='Loading of files', total=len(load_names)):
         with open(f'{name}.pkl', 'rb') as file:
             result[name] = pickle.load(file)
     return result
@@ -170,8 +173,8 @@ def predict_lm(data, eeg_param):
     
     Returns
     -------
-    tuple
-        (ac, roc_auc, interp_tpr, coefs)
+    :rtype:tuple
+    :return:(ac, roc_auc, interp_tpr, coefs)
     """
     mean_fpr = np.linspace(0, 1, 100)
     coefs = np.zeros((2, len(eeg_param[0]), eeg_param[1]))
@@ -202,8 +205,8 @@ def predict_lgbm(data, eeg_param):
         (fr_bands, n_channels)
     Returns
     -------   
-    tuple
-        (ac, roc_auc, interp_tpr, feature_importances)
+    :rtype:tuple
+    :return:(ac, roc_auc, interp_tpr, feature_importances)
     """
     mean_fpr = np.linspace(0, 1, 100)
     model = LGBMClassifier(objective='binary')
@@ -223,12 +226,12 @@ def plot_patterns(data, eeg_param):
     function that plot filters and patterns on topo
     Parameters
     ----------
-    data: ndarray
+    data: np.ndarray
     eeg_param: tuple
         (fr_bands, info)
     Returns
     -------   
-    figure 
+    :rtype:matplotlib.figure.Figure
     """
     vmax = 1
     vmin = -1
@@ -255,7 +258,7 @@ def plot_feature_importance(data, eeg_param):
     function that plot feature importances on topo
     Parameters
     ----------
-    data: ndarray
+    data: np.ndarray
     eeg_param: tuple
         (fr_bands, info)
     Returns
@@ -290,7 +293,7 @@ def plot_clusters(data, cl_param):
     function that plot significant clusters on topo
     Parameters
     ----------
-    data: ndarray
+    data: np.ndarray
     cl_param: tuple
         (fr_bands, info, sign_cl)
     Returns
@@ -325,11 +328,11 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
 
     Parameters
     ----------
-    tprs: list
-    aucs: list
-    list_predictions: list
+    tprs: list[float]
+    aucs: list[float]
+    list_predictions: list[np.ndarray[float]]
         predictions
-    list_y_true: list
+    list_y_true: list[list[int]]
         true target values
     method_name: str
         name of ml algorithm
