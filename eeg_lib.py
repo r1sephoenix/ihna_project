@@ -45,7 +45,7 @@ def eeg_power_band(epochs_list, fr_bands):
     return fin_feat, fin_mean_spectra
 
 
-def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, save_names='default'):
+def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default'):
     """
 
     Parameters
@@ -58,13 +58,16 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         specify raw epochs/spectra features or both. for saving on disc choose default value
     save: bool
         save on disc option
+    ret: bool
+        option to return values
     save_names: dict
         names of files
 
     Returns
     -------
     dict
-        ('raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names')
+        only if argument ret is True. Return dict with keys in ('raw_epochs', 'spectra_feat', 'mean_spectra',
+         'chan_names')
     """
     if len(res) != 2 and save:
         raise ValueError('Please, use default res attribute')
@@ -72,12 +75,13 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         raise ValueError('Please, specify all files names - for epochs, spectra features, mean spectra features and '
                          'ch_names')
     if save_names == 'default':
+        n_l = ['raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names', 'info_object']
         save_dict = dict(
-            zip(['raw_epochs', 'spectra_feat', 'mean_spectra', 'chan_names'], ['raw_epochs', 'spectra_feat',
-                                                                               'mean_spectra', 'chan_names']))
+            zip(n_l, n_l))
     else:
         save_dict = save_names
-    subj_list_mean_spectra, subj_list_features, e_list, l_res, s, chan_names = [], [], [], [], 0, None
+    subj_list_mean_spectra, subj_list_features, e_list, l_res, res_names, s, chan_names, info = \
+        [], [], [], [], [], 0, None, None
     for subj_paths, s_ind in zip(settings.files.values(), settings.files.keys()):
         paths, epochs_list = subj_paths, []
         for event_ind in settings.events:
@@ -112,6 +116,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
                 drop_channels(settings.channels_to_drop, verbose='ERROR')
             if s == 0:
                 chan_names = epochs_list[0].ch_names
+                info = mne.create_info(epochs_list[0].info.ch_names, ch_types='eeg', sfreq=250).set_montage(montage)
                 s += 1
         if 'raw_epochs' in res:
             e_list.append(epochs_list)
@@ -119,22 +124,26 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
             feat_list, tabl_list = eeg_power_band(epochs_list, settings.fr_bands)
             subj_list_mean_spectra.append(tabl_list)
             subj_list_features.append(feat_list)
-    res_names = list(res)
     if 'raw_epochs' in res:
         l_res.append(e_list)
+        res_names.append('raw_epochs')
     if 'spectra_feat' in res:
         spectra_feat = [[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
                         for i in range(len(settings.files))]
         l_res.extend([spectra_feat, np.stack(subj_list_mean_spectra)])
         res_names.append('mean_spectra')
-    res_names.append('chan_names')
-    l_res.append(chan_names)
+    res_names.extend(['chan_names', 'info_object'])
+    l_res.extend([chan_names, info])
     if save:
         for r, name in zip(l_res, list(save_dict.values())):
             with open(f'preprocessed_data/{name}.pkl', 'wb') as file:
                 pickle.dump(r, file)
-    data = dict(zip(res_names, l_res))
-    return data
+    if ret:
+        return dict(zip(res_names, l_res))
+
+
+def load_data():
+    pass
 
 
 def predict_lm(data, eeg_param):

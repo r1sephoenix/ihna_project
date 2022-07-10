@@ -15,7 +15,7 @@ ihna_classification_mat_versus_hum_tasks.ipynb
 
 ![alt text](https://github.com/r1sephoenix/ihna_project/blob/95a3e7bb5d922e1e5580ec1e885a3e8fe5a3e206/Results_pictures/241_242_lr_mat.jpg?raw=true)
 
-<center><b>Classification of mathematicians versus humanities<center><b>
+<center><b>Classification of mathematicians versus humanities</b></center>
 
 ![alt text](https://github.com/r1sephoenix/ihna_project/blob/5639d2c69ce8c440fe278aa457b3842ac568a315/Results_pictures/mat_versus_hum.jpg?raw=true)
 
