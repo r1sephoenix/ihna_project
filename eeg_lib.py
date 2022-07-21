@@ -262,11 +262,6 @@ def plot_patterns(coefs_list, eeg_param, subfig=None):
         cax = fig.add_axes([1, 0.3, 0.03, 0.38])
         cb = fig.colorbar(m, cax)
         cb.ax.tick_params(labelsize=40)
-        m = cm.ScalarMappable(cmap='RdBu_r')
-        cax = subfig.add_axes([1, 0.3, 0.03, 0.38])
-        cb = subfig.colorbar(m, cax)
-        cb.ax.tick_params(labelsize=60)
-        plt.close(fig)
         return fig
     else:
         return axes
@@ -403,8 +398,9 @@ def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, pl=True):
     bars_l = []
     for side, pos in zip(['left', 'right'], [1, 2]):
         bars_l.append(tqdm(range(3), total=3, desc=f'Draw 3 {side} plots', leave=False, position=pos))
-    for n, ax in enumerate(axs_left):
+    for n, (ax, name) in enumerate(zip(axs_left, ['A', 'B', 'C'])):
         bars_l[0].update(1)
+        ax.text(-0.05, 0.5, f'{name}', fontdict={'fontsize': 90, 'fontweight': 'semibold'})
         if fig_type == 1:
             ax_bar = plot_patterns(list(compress(data[s_ind, n, ...], results[s_ind, n, 1] > 0.5)),
                                    [settings.fr_bands, inf], ax)
@@ -416,12 +412,13 @@ def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, pl=True):
             ax_bar = plot_feature_importance(list(compress(data[s_ind, n, ...], results[s_ind, n, 1] > 0.5)),
                                              [settings.fr_bands, data['info_object']], ax)
             if n == 2:
-                m = cm.ScalarMappable(cmap='RdBu_r')
+                m = cm.ScalarMappable(cmap='hot')
                 m.set_array(np.array([0, 1]))
                 cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, location='bottom')
     cb.ax.tick_params(labelsize=80)
-    for n, ax in enumerate(axs_right):
+    for n, (ax, name) in enumerate(zip(axs_right, ['D', 'E', 'F'])):
         bars_l[1].update(1)
+        ax.text(-0.05, 0.5, f'{name}', fontdict={'fontsize': 90, 'fontweight': 'semibold'})
         ax = ax.subplots(nrows=1, ncols=1)
         plot_roc_curves([metrics['tprs'][i] for i in s_ind][n], [metrics['aucs'][i] for i in s_ind][n],
                         [metrics['pr_v'][i] for i in s_ind][n], [metrics['true_v'][i] for i in s_ind][n],
