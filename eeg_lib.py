@@ -1,6 +1,7 @@
 import pickle
 import mne
 import numpy as np
+from itertools import compress
 from lightgbm import LGBMClassifier
 from matplotlib import pyplot as plt, cm
 from mne.decoding import LinearModel, get_coef
@@ -8,8 +9,9 @@ from mne.time_frequency import psd_multitaper
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import balanced_accuracy_score, roc_curve, auc, RocCurveDisplay
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, minmax_scale
 from tqdm import tqdm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def eeg_power_band(epochs_list, fr_bands):
@@ -43,7 +45,8 @@ def eeg_power_band(epochs_list, fr_bands):
     return fin_feat, fin_mean_spectra
 
 
-def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default'):
+def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default',
+                   rest=False):
     """
     function for dataset creation
     Parameters
@@ -60,7 +63,8 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         option to return values
     save_names: str or dict
         names of files
-
+    rest: bool
+        for resting state data
     Returns
     -------
     :rtype: dict
@@ -82,7 +86,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         [], [], [], [], [], 0, None, None
     n_subj = len(settings.files)
     for subj_paths, s_ind in tqdm(zip(settings.files.values(), settings.files.keys()), total=n_subj,
-                                  desc=f'Creation of dataset for{n_subj}', position=0):
+                                  desc=f'Creation of dataset for {n_subj} subjects', position=0):
         paths, epochs_list = subj_paths, []
         for event_ind in settings.events:
             j = 0
@@ -131,12 +135,13 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         spectra_feat = [[np.stack(subj_list_features[i][j], axis=1) for j in range(3)]
                         for i in range(len(settings.files))]
         l_res.extend([spectra_feat, np.stack(subj_list_mean_spectra)])
-        res_names.append('mean_spectra')
+        res_names.extend(['spectra_feat', 'mean_spectra'])
     res_names.extend(['chan_names', 'info_object'])
     l_res.extend([chan_names, info])
     if save:
+        save_folder = 'preprocessed_data'
         for r, name in tqdm(zip(l_res, list(save_dict.values())), total=len(save_dict), desc=f'Saving'):
-            with open(f'preprocessed_data/{name}.pkl', 'wb') as file:
+            with open(f'{save_folder}/{name}.pkl', 'wb') as file:
                 pickle.dump(r, file)
     if ret:
         return dict(zip(res_names, l_res))
@@ -206,7 +211,7 @@ def predict_lgbm(data, eeg_param):
     Returns
     -------   
     :rtype: tuple
-    :return: ac, roc_auc, interp_tpr, feature_importances
+    :return: ac, roc_auc, interp_tpr, feature_importances, y_predict_pr
     """
     mean_fpr = np.linspace(0, 1, 100)
     model = LGBMClassifier(objective='binary')
@@ -218,56 +223,73 @@ def predict_lgbm(data, eeg_param):
     fpr, tpr, _ = roc_curve(data[3], y_predict_pr[:, 0], pos_label=0)
     roc_auc, interp_tpr = auc(fpr, tpr), np.interp(mean_fpr, fpr, tpr)
     interp_tpr[0] = 0.0
-    return ac, roc_auc, interp_tpr, feature_importances
+    return ac, roc_auc, interp_tpr, feature_importances, y_predict_pr
 
 
-def plot_patterns(data, eeg_param):
+def plot_patterns(coefs_list, eeg_param, subfig=None):
     """
     function that plot filters and patterns on topo
     Parameters
     ----------
-    data: np.ndarray
+    data: list[np.ndarray]
     eeg_param: tuple
         (fr_bands, info)
+    subfig:
     Returns
     -------   
     :rtype:matplotlib.figure.Figure
     """
-    vmax = 1
-    vmin = -1
-    fig, axes = plt.subplots(nrows=2, ncols=len(eeg_param[0]), figsize=(30, 20))
+    min_max, s, vmax, vmin, ret = [], coefs_list[0].shape, 1, -1, False
+    if subfig is None:
+        ret = True
+        fig, axes = plt.subplots(nrows=2, ncols=len(eeg_param[0]), figsize=(30, 20))
+    else:
+        axes = subfig.subplots(nrows=2, ncols=len(eeg_param[0]))
+    for i in range(len(coefs_list)):
+        min_max.append(minmax_scale(coefs_list[i].reshape(2, -1), feature_range=(vmin, vmax), axis=1).reshape(s))
+    data = np.mean(min_max, axis=0)
     for name, pos, plot_name, ind in zip(('patterns_', 'filters_'), (0.82, 0.5),
                                          ('Patterns', 'Filters'), (0, 1)):
         for i, key in enumerate(list(eeg_param[0].keys())):
             mne.viz.plot_topomap(data[ind, i, :], eeg_param[1], vmin=vmin, vmax=vmax, axes=axes[ind, i],
                                  show=False)
             axes[ind, i].set_title(label=f'{eeg_param[0][key][0]}-{eeg_param[0][key][1]} Hz',
-                                   fontdict={'fontsize': 40, 'fontweight': 'semibold'})
+                                   fontdict={'fontsize': 55, 'fontweight': 'semibold'})
             mne.viz.tight_layout()
-        plt.figtext(0.5, pos, f'{plot_name}', va='center', ha='center', size=44, fontweight='semibold')
-    m = cm.ScalarMappable(cmap='RdBu_r')
-    m.set_array(np.array([vmin, vmax]))
-    cax = fig.add_axes([1, 0.3, 0.03, 0.38])
-    cb = fig.colorbar(m, cax)
-    cb.ax.tick_params(labelsize=40)
-    return fig
+    if ret:
+        m = cm.ScalarMappable(cmap='RdBu_r')
+        m.set_array(np.array([vmin, vmax]))
+        cax = fig.add_axes([1, 0.3, 0.03, 0.38])
+        cb = fig.colorbar(m, cax)
+        cb.ax.tick_params(labelsize=40)
+        m = cm.ScalarMappable(cmap='RdBu_r')
+        cax = subfig.add_axes([1, 0.3, 0.03, 0.38])
+        cb = subfig.colorbar(m, cax)
+        cb.ax.tick_params(labelsize=60)
+        plt.close(fig)
+        return fig
+    else:
+        return axes
 
 
-def plot_feature_importance(data, eeg_param):
+def plot_feature_importance(data, eeg_param, subfig=None):
     """
     function that plot feature importances on topo
     Parameters
     ----------
-    data: np.ndarray
+    data: list[np.ndarray]
     eeg_param: tuple
         (fr_bands, info)
+    subfig
     Returns
     -------   
     figure     
     """
-    vmin = 0
-    vmax = np.amax(data)
-    fig, axes = plt.subplots(nrows=1, ncols=len(eeg_param[0]), figsize=(30, 20))
+    if subfig is None:
+        fig, axes = plt.subplots(nrows=2, ncols=len(eeg_param[0]), figsize=(30, 20))
+    else:
+        axes = subfig.subplots(nrows=2, ncols=len(eeg_param[0]))
+    vmin, vmax = 0, np.amax(data)
     num = 0
     for i, key in enumerate(list(eeg_param[0].keys())):
         if i in range(7):
@@ -300,7 +322,7 @@ def plot_clusters(data, cl_param):
     -------
     figure
     """
-    vmin = np.amin(data)
+    vmin = 0
     vmax = np.amax(data)
     fig, axes = plt.subplots(nrows=1, ncols=len(cl_param[2]), figsize=(30, 20))
     num = 0
@@ -323,7 +345,7 @@ def plot_clusters(data, cl_param):
     return fig
 
 
-def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot_all=True):
+def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot_all=True, ax=None):
     """
 
     Parameters
@@ -338,31 +360,74 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
         name of ml algorithm
     plot_all: bool
         Plot or not to plot roc for each fold. Default True
+    ax:
     Returns
     -------
     figure
     """
-    mean_fpr = np.linspace(0, 1, 100)
-    fig, ax = plt.subplots(figsize=(12, 8))
+    mean_fpr, ret = np.linspace(0, 1, 100), False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ret = True
     if plot_all:
         for i, (y_true, pred) in enumerate(zip(list_y_true, list_predictions)):
             RocCurveDisplay.from_predictions(y_true=y_true, y_pred=pred.tolist(), name=f"ROC fold {i + 1}",
                                              pos_label=0, ax=ax)
-    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=0.8, fontdict={'fontsize': 35})
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=0.8)
     mean_tpr = np.mean(tprs, axis=0)
     mean_tpr[-1] = 1.0
     mean_auc, std_auc = auc(mean_fpr, mean_tpr), np.std(aucs)
     std_tpr = np.std(tprs, axis=0)
     tprs_upper, tprs_lower = np.minimum(mean_tpr + std_tpr, 1), np.maximum(mean_tpr - std_tpr, 0)
     ax.plot(mean_fpr, mean_tpr, color='b', label=f'Mean ROC (AUC = {mean_auc:.2f} \u00B1 {std_auc:.2f})', lw=2,
-            alpha=0.8, fontdict={'fontsize': 35})
-    ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=0.2, label='\u00B1  1 std. dev.',
-                    fontdict={'fontsize': 35})
-    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05], title=f'Receiver operating characteristic {method_name}',
-           fontdict={'fontsize': 40, 'fontweight': 'semibold'})
-    ax.legend(loc='lower right')
+            alpha=0.8)
+    ax.fill_between(mean_fpr, tprs_lower, tprs_upper, color='grey', alpha=0.2, label='\u00B1  1 std. dev.')
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05])
+    ax.tick_params(axis='both', labelsize=65)
+    ax.set_xlabel('True Positive Rate', fontsize=70)
+    ax.set_ylabel('False Positive Rate', fontsize=70)
+    ax.legend(loc='lower right', fontsize=55)
+    if ret:
+        plt.close(fig)
+        return fig
+    else:
+        pass
+
+
+def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, pl=True):
+    if fig_type not in [1, 2]:
+        raise ValueError('Please type correct value: 1 for filters/patterns, 2 for feature importance')
+    fig = plt.figure(constrained_layout=True, figsize=(75, 60))
+    subfigs = fig.subfigures(1, 2, wspace=0.07)
+    axs_left, axs_right = subfigs[0].subfigures(3, 1), subfigs[1].subfigures(3, 1)
+    bars_l = []
+    for side, pos in zip(['left', 'right'], [1, 2]):
+        bars_l.append(tqdm(range(3), total=3, desc=f'Draw 3 {side} plots', leave=False, position=pos))
+    for n, ax in enumerate(axs_left):
+        bars_l[0].update(1)
+        if fig_type == 1:
+            ax_bar = plot_patterns(list(compress(data[s_ind, n, ...], results[s_ind, n, 1] > 0.5)),
+                                   [settings.fr_bands, inf], ax)
+            if n == 2:
+                m = cm.ScalarMappable(cmap='RdBu_r')
+                m.set_array(np.array([-1, 1]))
+                cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, location='bottom')
+        if fig_type == 2:
+            ax_bar = plot_feature_importance(list(compress(data[s_ind, n, ...], results[s_ind, n, 1] > 0.5)),
+                                             [settings.fr_bands, data['info_object']], ax)
+            if n == 2:
+                m = cm.ScalarMappable(cmap='RdBu_r')
+                m.set_array(np.array([0, 1]))
+                cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, location='bottom')
+    cb.ax.tick_params(labelsize=80)
+    for n, ax in enumerate(axs_right):
+        bars_l[1].update(1)
+        ax = ax.subplots(nrows=1, ncols=1)
+        plot_roc_curves([metrics['tprs'][i] for i in s_ind][n], [metrics['aucs'][i] for i in s_ind][n],
+                        [metrics['pr_v'][i] for i in s_ind][n], [metrics['true_v'][i] for i in s_ind][n],
+                        'Logistic regression', plot_all=False, ax=ax)
+    if pl:
+        plt.show()
+    else:
+        plt.close(fig)
     return fig
-
-
-def merge_fig():
-    pass
