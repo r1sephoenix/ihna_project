@@ -2,16 +2,20 @@ import pickle
 import mne
 import numpy as np
 from itertools import compress
-from lightgbm import LGBMClassifier
+
+from scipy import stats
 from matplotlib import pyplot as plt, cm
 from mne.decoding import LinearModel, get_coef
+from mne.stats import permutation_cluster_test
 from mne.time_frequency import psd_multitaper
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import balanced_accuracy_score, roc_curve, auc, RocCurveDisplay
+from sklearn.model_selection import RepeatedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, minmax_scale
 from tqdm import tqdm
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+import optuna
+import optuna.integration.lightgbm as lgb
 
 
 def eeg_power_band(epochs_list, fr_bands):
@@ -167,7 +171,7 @@ def load_data(load_names):
     return result
 
 
-def predict_lm(data, eeg_param):
+def predict_lm(data, eeg_param, ps=None):
     """
     function for logistic regression model
     Parameters
@@ -186,7 +190,7 @@ def predict_lm(data, eeg_param):
     model = make_pipeline(StandardScaler(),
                           LinearModel(LogisticRegressionCV(Cs=list(np.power(10.0, np.arange(-10, 10))), penalty='l2',
                                                            scoring='roc_auc', random_state=0, max_iter=10000,
-                                                           fit_intercept=True, solver='newton-cg',
+                                                           fit_intercept=True, solver='newton-cg', cv=ps,
                                                            class_weight='balanced', tol=10)))
     model.fit(data[0], data[2])
     y_predict, y_predict_pr = model.predict(data[1]), model.predict_proba(data[1])
@@ -200,7 +204,7 @@ def predict_lm(data, eeg_param):
     return ac, roc_auc, interp_tpr, coefs, y_predict_pr
 
 
-def predict_lgbm(data, eeg_param):
+def predict_lgbm(data, eeg_param, ps=None):
     """
     function for LightGBM model
     Parameters
@@ -213,17 +217,35 @@ def predict_lgbm(data, eeg_param):
     :rtype: tuple
     :return: ac, roc_auc, interp_tpr, feature_importances, y_predict_pr
     """
-    mean_fpr = np.linspace(0, 1, 100)
-    model = LGBMClassifier(objective='binary')
-    model.fit(data[0], data[2])
-    feature_importances = ((model.feature_importances_ / sum(model.feature_importances_)) * 100).reshape((eeg_param[0],
-                                                                                                          eeg_param[1]))
+    mean_fpr, st = np.linspace(0, 1, 100), None
+    params = {'objective': 'binary', 'metric': 'binary_error', 'verbosity': -1, 'boosting_type': 'gbdt', 'seed': 42}
+    study_tuner = optuna.create_study(direction='minimize')
+    if ps is None:
+        ps, st = RepeatedKFold(n_splits=10, n_repeats=10, random_state=42), 250
+    sc = StandardScaler()
+    data[0] = sc.fit_transform(data[0])
+    data[1] = sc.transform(data[1])
+    train = lgb.Dataset(data[0], label=data[2])
+    tuner = lgb.LightGBMTunerCV(params, train, study=study_tuner, verbose_eval=False, early_stopping_rounds=st,
+                                seed=42, folds=ps, num_boost_round=10000, return_cvbooster=True)
+    tuner.run()
+    model = tuner.get_best_booster()
+    feature_importances = ((model.feature_importances_ / sum(model.feature_importances_)) * 100).reshape(
+        (len(eeg_param[0]), len(eeg_param[1])))
     y_predict, y_predict_pr = model.predict(data[1]), model.predict_proba(data[1])
     ac = balanced_accuracy_score(data[3], y_predict)
     fpr, tpr, _ = roc_curve(data[3], y_predict_pr[:, 0], pos_label=0)
     roc_auc, interp_tpr = auc(fpr, tpr), np.interp(mean_fpr, fpr, tpr)
     interp_tpr[0] = 0.0
     return ac, roc_auc, interp_tpr, feature_importances, y_predict_pr
+
+
+def c_bar(v_min, v_max, c_map, fig):
+    m = cm.ScalarMappable(cmap=f'{c_map}')
+    m.set_array(np.array([v_min, v_max]))
+    cax = fig.add_axes([1, 0.3, 0.03, 0.38])
+    cb = fig.colorbar(m, cax)
+    cb.ax.tick_params(labelsize=40)
 
 
 def plot_patterns(coefs_list, eeg_param, subfig=None):
@@ -248,6 +270,7 @@ def plot_patterns(coefs_list, eeg_param, subfig=None):
     for i in range(len(coefs_list)):
         min_max.append(minmax_scale(coefs_list[i].reshape(2, -1), feature_range=(vmin, vmax), axis=1).reshape(s))
     data = np.mean(min_max, axis=0)
+    data = minmax_scale(data.reshape(2, -1), feature_range=(vmin, vmax), axis=1).reshape(s)
     for name, pos, plot_name, ind in zip(('patterns_', 'filters_'), (0.82, 0.5),
                                          ('Patterns', 'Filters'), (0, 1)):
         for i, key in enumerate(list(eeg_param[0].keys())):
@@ -257,11 +280,7 @@ def plot_patterns(coefs_list, eeg_param, subfig=None):
                                    fontdict={'fontsize': 55, 'fontweight': 'semibold'})
             mne.viz.tight_layout()
     if ret:
-        m = cm.ScalarMappable(cmap='RdBu_r')
-        m.set_array(np.array([vmin, vmax]))
-        cax = fig.add_axes([1, 0.3, 0.03, 0.38])
-        cb = fig.colorbar(m, cax)
-        cb.ax.tick_params(labelsize=40)
+        c_bar(vmin, vmax, 'RdBu_r', fig)
         return fig
     else:
         return axes
@@ -280,29 +299,26 @@ def plot_feature_importance(data, eeg_param, subfig=None):
     -------   
     figure     
     """
+    vmin, vmax, min_max, s, ret = 0, 1, [], data[0].shape, False
     if subfig is None:
-        fig, axes = plt.subplots(nrows=2, ncols=len(eeg_param[0]), figsize=(30, 20))
+        fig, axes = plt.subplots(nrows=1, ncols=len(eeg_param[0]), figsize=(30, 20))
+        ret = True
     else:
-        axes = subfig.subplots(nrows=2, ncols=len(eeg_param[0]))
-    vmin, vmax = 0, np.amax(data)
-    num = 0
+        axes = subfig.subplots(nrows=1, ncols=len(eeg_param[0]))
+    for i in range(len(data)):
+        min_max.append(minmax_scale(data[i].reshape(1, -1), feature_range=(0, 1), axis=1).reshape(s))
+    data = np.mean(min_max, axis=0)
+    data = minmax_scale(data.reshape(1, -1), feature_range=(0, 1), axis=1).reshape(s)
     for i, key in enumerate(list(eeg_param[0].keys())):
-        if i in range(7):
-            evoked = mne.EvokedArray(data[i, :].reshape(-1, 1),
-                                     eeg_param[1], tmin=0.)
-            evoked.plot_topomap(axes=axes[num], time_format=None, colorbar=False, times=[0], cmap='hot',
-                                size=5, show_names=False, vmin=0, show=False)
-            axes[num].set_title(label=f'{eeg_param[0][key][0]}-{eeg_param[0][key][1]} Hz',
-                                fontdict={'fontsize': 40, 'fontweight': 'semibold'})
-            mne.viz.tight_layout()
-            num += 1
-    m = cm.ScalarMappable(cmap='hot')
-    m.set_array(np.array([vmin, vmax]))
-    cax = fig.add_axes([1, 0.3, 0.03, 0.38])
-    cb = fig.colorbar(m, cax)
-    cb.ax.tick_params(labelsize=40)
-    plt.figtext(0.5, 0.7, 'Features importance', va='center', ha='center', size=60, fontweight='semibold')
-    return fig
+        mne.viz.plot_topomap(data[i, :], eeg_param[1], vmin=0, vmax=1, axes=axes[i], cmap='hot',
+                             show=False)
+        axes[i].set_title(label=f'{eeg_param[0][key][0]}-{eeg_param[0][key][1]} Hz',
+                          fontdict={'fontsize': 55, 'fontweight': 'semibold'})
+        mne.viz.tight_layout()
+    if ret:
+        c_bar(vmin, vmax, 'hot', fig)
+    else:
+        return axes
 
 
 def plot_clusters(data, cl_param):
@@ -317,30 +333,31 @@ def plot_clusters(data, cl_param):
     -------
     figure
     """
-    vmin = 0
-    vmax = np.amax(data)
-    fig, axes = plt.subplots(nrows=1, ncols=len(cl_param[2]), figsize=(30, 20))
-    num = 0
+    thr = -stats.t.ppf(0.05 / 2, 1)
+    t_obs, clusters, cluster_p_values, _ = permutation_cluster_test([b1, b2], threshold=thr, adjacency=None,
+                                                                    out_type='mask', n_permutations=1024)
+    t_obs_plot = np.nan * np.ones_like(t_obs)
+    for c, p_val in zip(clusters, cluster_p_values):
+        if p_val <= 0.05:
+            t_obs_plot[c] = t_obs[c]
+    np.nan_to_num(t_obs_plot, copy=False)
+    if np.count_nonzero(t_obs_plot) > 0:
+        res_ar = t_obs_plot
+    mr_ar = res_ar > 0
+    vmin, vmax = 0, np.amax(data)
+    fig, axes = plt.subplots(nrows=3, ncols=len(cl_param[2]), figsize=(30, 20))
     for i, key in enumerate(list(cl_param[0].keys())):
-        if i in cl_param[2]:
-            evoked = mne.EvokedArray(data[i, :].reshape(-1, 1),
-                                     cl_param[1], tmin=0.)
-            evoked.plot_topomap(axes=axes[num], time_format=None, colorbar=False, times=[0], size=5, show_names=True,
-                                show=False)
-            axes[num].set_title(label=f'{cl_param[0][key][0]}-{cl_param[0][key][1]} Hz',
-                                fontdict={'fontsize': 40, 'fontweight': 'semibold'})
-            mne.viz.tight_layout()
-            num += 1
-    m = cm.ScalarMappable(cmap='Reds')
-    m.set_array(np.array([vmin, vmax]))
-    cax = fig.add_axes([1, 0.3, 0.03, 0.38])
-    cb = fig.colorbar(m, cax)
-    cb.ax.tick_params(labelsize=40)
-    plt.figtext(0.5, 1.0, 'Significant clusters', va='center', ha='center', size=60, fontweight='semibold')
+        mne.viz.plot_topomap(axes=axes[i], time_format=None, colorbar=False, times=[0], vmin=vmin, vmax=vmax,
+                             size=5, show_names=True, show=False, cmap='hot',
+                             mask=mr_ar[i, :].reshape(-1, 1))
+        axes[i].set_title(label=f'{cl_param[0][key][0]}-{cl_param[0][key][1]} Hz',
+                          fontdict={'fontsize': 50, 'fontweight': 'semibold'})
+        mne.viz.tight_layout()
+    c_bar(vmin, vmax, 'hot', fig)
     return fig
 
 
-def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot_all=True, ax=None):
+def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, plot_all=True, ax=None):
     """
 
     Parameters
@@ -351,8 +368,6 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
         predictions
     list_y_true: list[list[int]]
         true target values
-    method_name: str
-        name of ml algorithm
     plot_all: bool
         Plot or not to plot roc for each fold. Default True
     ax:
@@ -366,8 +381,7 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
         ret = True
     if plot_all:
         for i, (y_true, pred) in enumerate(zip(list_y_true, list_predictions)):
-            RocCurveDisplay.from_predictions(y_true=y_true, y_pred=pred.tolist(), name=f"ROC fold {i + 1}",
-                                             pos_label=0, ax=ax)
+            RocCurveDisplay.from_predictions(y_true=y_true, y_pred=pred[:, 1].tolist(), name=f"ROC fold {i + 1}", ax=ax)
     ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=0.8)
     mean_tpr = np.mean(tprs, axis=0)
     mean_tpr[-1] = 1.0
@@ -389,13 +403,12 @@ def plot_roc_curves(tprs, aucs, list_predictions, list_y_true, method_name, plot
         pass
 
 
-def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, pl=True):
+def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, roc_plot_all=False, pl=True):
     if fig_type not in [1, 2]:
         raise ValueError('Please type correct value: 1 for filters/patterns, 2 for feature importance')
     fig = plt.figure(constrained_layout=True, figsize=(75, 60))
     subfigs = fig.subfigures(1, 2, wspace=0.07)
-    axs_left, axs_right = subfigs[0].subfigures(3, 1), subfigs[1].subfigures(3, 1)
-    bars_l = []
+    axs_left, axs_right, bars_l = subfigs[0].subfigures(3, 1), subfigs[1].subfigures(3, 1), []
     for side, pos in zip(['left', 'right'], [1, 2]):
         bars_l.append(tqdm(range(3), total=3, desc=f'Draw 3 {side} plots', leave=False, position=pos))
     for n, (ax, name) in enumerate(zip(axs_left, ['A', 'B', 'C'])):
@@ -410,19 +423,19 @@ def merge_fig(fig_type, data, s_ind, metrics, results, settings, inf, pl=True):
                 cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, location='bottom')
         if fig_type == 2:
             ax_bar = plot_feature_importance(list(compress(data[s_ind, n, ...], results[s_ind, n, 1] > 0.5)),
-                                             [settings.fr_bands, data['info_object']], ax)
+                                             [settings.fr_bands, inf], ax)
             if n == 2:
                 m = cm.ScalarMappable(cmap='hot')
                 m.set_array(np.array([0, 1]))
-                cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, location='bottom')
+                cb = subfigs[0].colorbar(m, ax=ax_bar, shrink=0.6, pad=0.3, location='bottom')
     cb.ax.tick_params(labelsize=80)
     for n, (ax, name) in enumerate(zip(axs_right, ['D', 'E', 'F'])):
         bars_l[1].update(1)
         ax.text(-0.05, 0.5, f'{name}', fontdict={'fontsize': 90, 'fontweight': 'semibold'})
         ax = ax.subplots(nrows=1, ncols=1)
-        plot_roc_curves([metrics['tprs'][i] for i in s_ind][n], [metrics['aucs'][i] for i in s_ind][n],
-                        [metrics['pr_v'][i] for i in s_ind][n], [metrics['true_v'][i] for i in s_ind][n],
-                        'Logistic regression', plot_all=False, ax=ax)
+        plot_roc_curves([metrics['tprs'][i][n] for i in s_ind], [metrics['aucs'][i][n] for i in s_ind],
+                        [metrics['pr_v'][i][n] for i in s_ind], [metrics['true_v'][i][n] for i in s_ind],
+                        plot_all=roc_plot_all, ax=ax)
     if pl:
         plt.show()
     else:
