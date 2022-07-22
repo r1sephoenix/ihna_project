@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler, minmax_scale
 from tqdm import tqdm
 import optuna
 import optuna.integration.lightgbm as lgb
+from lightgbm import LGBMClassifier as lgbm
 
 
 def eeg_power_band(epochs_list, fr_bands):
@@ -221,15 +222,16 @@ def predict_lgbm(data, eeg_param, ps=None):
     params = {'objective': 'binary', 'metric': 'binary_error', 'verbosity': -1, 'boosting_type': 'gbdt', 'seed': 42}
     study_tuner = optuna.create_study(direction='minimize')
     if ps is None:
-        ps, st = RepeatedKFold(n_splits=10, n_repeats=10, random_state=42), 250
+        ps = RepeatedKFold(n_splits=10, n_repeats=10, random_state=42)
     sc = StandardScaler()
     data[0] = sc.fit_transform(data[0])
     data[1] = sc.transform(data[1])
     train = lgb.Dataset(data[0], label=data[2])
-    tuner = lgb.LightGBMTunerCV(params, train, study=study_tuner, verbose_eval=False, early_stopping_rounds=st,
-                                seed=42, folds=ps, num_boost_round=10000, return_cvbooster=True)
+    tuner = lgb.LightGBMTunerCV(params, train, study=study_tuner, verbose_eval=False,
+                                seed=42, folds=ps, num_boost_round=1000)
     tuner.run()
-    model = tuner.get_best_booster()
+    model = lgbm(tuner.best_params)
+    model.fit(data[0], data[2])
     feature_importances = ((model.feature_importances_ / sum(model.feature_importances_)) * 100).reshape(
         (len(eeg_param[0]), len(eeg_param[1])))
     y_predict, y_predict_pr = model.predict(data[1]), model.predict_proba(data[1])
@@ -326,34 +328,38 @@ def plot_clusters(data, cl_param):
     function that plot significant clusters on topo
     Parameters
     ----------
-    data: np.ndarray
+    data: list[np.ndarray]
+        list with samples
     cl_param: tuple
-        (fr_bands, info, sign_cl)
+        (fr_bands, info)
     Returns
     -------
     figure
     """
-    thr = -stats.t.ppf(0.05 / 2, 1)
-    t_obs, clusters, cluster_p_values, _ = permutation_cluster_test([b1, b2], threshold=thr, adjacency=None,
-                                                                    out_type='mask', n_permutations=1024)
-    t_obs_plot = np.nan * np.ones_like(t_obs)
-    for c, p_val in zip(clusters, cluster_p_values):
-        if p_val <= 0.05:
-            t_obs_plot[c] = t_obs[c]
-    np.nan_to_num(t_obs_plot, copy=False)
-    if np.count_nonzero(t_obs_plot) > 0:
-        res_ar = t_obs_plot
-    mr_ar = res_ar > 0
-    vmin, vmax = 0, np.amax(data)
-    fig, axes = plt.subplots(nrows=3, ncols=len(cl_param[2]), figsize=(30, 20))
-    for i, key in enumerate(list(cl_param[0].keys())):
-        mne.viz.plot_topomap(axes=axes[i], time_format=None, colorbar=False, times=[0], vmin=vmin, vmax=vmax,
-                             size=5, show_names=True, show=False, cmap='hot',
-                             mask=mr_ar[i, :].reshape(-1, 1))
-        axes[i].set_title(label=f'{cl_param[0][key][0]}-{cl_param[0][key][1]} Hz',
-                          fontdict={'fontsize': 50, 'fontweight': 'semibold'})
-        mne.viz.tight_layout()
-    c_bar(vmin, vmax, 'hot', fig)
+    fig, axes = plt.subplots(nrows=3, ncols=len(cl_param[0]), figsize=(30, 20))
+    vmin, thr = 0, -stats.t.ppf(0.05/2, 1)
+    for i, name in zip(range(3), ['A', 'B', 'C']):
+        t_obs, clusters, cluster_p_values, _ = permutation_cluster_test([data[0][:, i], data[1][:, i]], threshold=thr,
+                                                                        adjacency=None, out_type='mask',
+                                                                        n_permutations=1024)
+        t_obs_plot = np.nan * np.ones_like(t_obs)
+        for c, p_val in zip(clusters, cluster_p_values):
+            if p_val <= 0.05:
+                t_obs_plot[c] = t_obs[c]
+        np.nan_to_num(t_obs_plot, copy=False)
+        if np.count_nonzero(t_obs_plot) > 0:
+            res_ar = t_obs_plot
+        mr_ar = res_ar > 0
+        vmax = np.amax(res_ar)
+        for j, key in enumerate(list(cl_param[0].keys())):
+            mne.viz.plot_topomap(axes=axes[i, j], time_format=None, colorbar=False, times=[0], vmin=vmin, vmax=vmax,
+                                 size=5, show_names=True, show=False, cmap='hot',
+                                 mask=mr_ar[i, :].reshape(-1, 1))
+            axes[i, j].set_title(label=f'{cl_param[0][key][0]}-{cl_param[0][key][1]} Hz',
+                                 fontdict={'fontsize': 50, 'fontweight': 'semibold'})
+            mne.viz.tight_layout()
+        c_bar(vmin, vmax, 'hot', fig)
+        fig.text(-0.05, 0.5, f'{name}', fontdict={'fontsize': 90, 'fontweight': 'semibold'})
     return fig
 
 
