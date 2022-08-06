@@ -14,14 +14,14 @@ ihna_classification_mat_versus_hum_tasks.ipynb
 <!--suppress HtmlDeprecatedAttribute -->
 <div align="center"> <b>Classification of tasks using oscillatory activity</b> </div>
 
-![alt text](Results/accuracy_ind_tasks_math.png)
-![alt text](Results/log_reg_ind_tasks_math.png)
-![alt text](Results/lgb_ind_tasks_math.png)
+![alt text](article_figures/accuracy_ind_tasks_math.png)
+![alt text](article_figures/log_reg_ind_tasks_math.png)
+![alt text](article_figures/lgb_ind_tasks_math.png)
 <div align="center"> <b>Classification of mathematicians versus humanitarians</b> </div>
 
-![alt text](Results/accuracy_cross_subject_group.png)
-![alt text](Results/log_reg_cross_subject_group.png)
-![alt text](Results/lgb_cross_subject_group.png)
+![alt text](article_figures/accuracy_cross_subject_group.png)
+![alt text](article_figures/log_reg_cross_subject_group.png)
+![alt text](article_figures/lgb_cross_subject_group.png)
 2) Classification of mathematicians from the humanities based on the oscillatory activity of the EEG recorded at rest 
 (Eyes open)\
 ihna_classification_mat_versus_hum_resting_state.ipynb
