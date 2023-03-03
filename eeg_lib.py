@@ -2,24 +2,26 @@ import pickle
 import mne
 import numpy as np
 from itertools import compress
+import h5io
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
+from settings import EEGSettings
 from scipy import stats
 from matplotlib import pyplot as plt, cm
 from mne.decoding import LinearModel, get_coef
 from mne.stats import permutation_cluster_test
-from mne.time_frequency import psd_multitaper
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import balanced_accuracy_score, roc_curve, auc, RocCurveDisplay
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, minmax_scale
-from tqdm import tqdm
 from lightgbm import LGBMClassifier as lgbm
 
 
-def eeg_power_band(epochs_list, fr_bands):
+def eeg_power_band(result: dict, fr_bands: dict[str, list[int]]) -> dict:
     """
-    function for evaluation of powers in specific frequency bands
+    Function for evaluation of relative spectra power in specific frequency bands
     Parameters
     ----------
     epochs_list
@@ -30,25 +32,69 @@ def eeg_power_band(epochs_list, fr_bands):
     :rtype: tuple
     :return: features for models, features for stat tests
     """
-    fin_mean_spectra, fin_feat = [], []
-    for ind in range(len(epochs_list)):
-        psds, freqs = psd_multitaper(epochs_list[ind], verbose=False)
+    name = ''
+    with open(f'preprocessed_data/{name}.pkl', 'rb') as file:
+        result[name] = pickle.load(file)
+    dict_spectra = {'mean_spectra': [], 'spectra_feat': []}
+    for ind in range(len(result['epochs'])):
+        psds, freqs = result['epochs'].compute_psd(method='multitaper', verbose=False).get_data(return_freqs=True)
         psds_mean_spectra = np.mean(psds, axis=0)
         psds /= psds.sum(axis=-1)[..., None]
         psds_mean_spectra /= psds_mean_spectra.sum(axis=-1)[..., None]
-        psd_bands_mean_spectra_list, psd_bands_features_list = [], []
+        psd_m, psd_f = [], []
         for fmin, fmax in fr_bands.values():
             freq_mask = (fmin < freqs) & (freqs < fmax)
             data_mean_spectra, data_feat = psds_mean_spectra[..., freq_mask].mean(axis=-1), psds[..., freq_mask]. \
                 mean(axis=-1)
-            psd_bands_features_list.append(data_feat)
-            psd_bands_mean_spectra_list.append(data_mean_spectra)
-        fin_mean_spectra.append(psd_bands_mean_spectra_list)
-        fin_feat.append(psd_bands_features_list)
-    return fin_feat, fin_mean_spectra
+            psd_f.append(data_feat)
+            psd_m.append(data_mean_spectra)
+        dict_spectra.update({key: val.append(new_val) for key, val in dict_spectra.items() for new_val in
+                             [psd_m, psd_f]})
+    return dict_spectra
 
 
-def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default',
+def subj_proc(settings: EEGSettings, paths: list[str], s_ind, info=True) -> dict:
+    """
+
+    Returns
+    -------
+
+    """
+    epochs_list, result = [], {}
+    montage = mne.channels.make_standard_montage(settings.montage_name)
+    for event_ind in settings.events:
+        epochs, j = None, 0
+        for i in [x for x in paths if '{0}'.format(event_ind) in x]:
+            raw = mne.io.read_raw_edf(i, verbose='ERROR')
+            if len(raw.times) // 500 < 10:
+                continue
+            new_events = mne.make_fixed_length_events(raw, id=event_ind, start=5, duration=2, overlap=0)
+            if j == 1:
+                epochs = mne.concatenate_epochs([mne.Epochs(raw, new_events, event_id=event_ind, tmin=0,
+                                                            tmax=2, baseline=None, flat=dict(eeg=1e-20),
+                                                            preload=True, verbose='ERROR'), epochs],
+                                                verbose='ERROR')
+            else:
+                epochs = mne.Epochs(raw, new_events, event_id=event_ind, tmin=0, tmax=2, baseline=None,
+                                    flat=dict(eeg=1e-20), preload=True, verbose='ERROR')
+                j += 1
+        if epochs is not None:
+            epochs_list.append(epochs.copy())
+    if not epochs_list:
+        raise ValueError(f'{s_ind} subject data is too short to be processed. Please check files manually')
+    for epoch in range(len(epochs_list)):
+        new_names = {(ch_name, ch_name.replace('-', '').replace('Chan ', 'E').replace('CAR', '').replace('EEG ', '')
+                      .replace('CA', '').replace(' ', '')) for ch_name in epochs_list[epoch].ch_names}
+        epochs_list[epoch].rename_channels(new_names, verbose='ERROR').set_montage(montage, verbose='ERROR'). \
+            drop_channels(settings.channels_to_drop)
+    result['epochs'] = epochs_list
+    if info:
+        result['chan_names'] = epochs_list[0].ch_names
+        result['info'] = mne.create_info(epochs_list[0].info.ch_names, ch_types='eeg', sfreq=250).set_montage(montage)
+    return result
+
+
+def create_dataset(settings, res=('raw_epochs', 'spectra_feat'), save=True, ret=True, save_names='default',
                    rest=False):
     """
     function for dataset creation
@@ -56,8 +102,6 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
     ----------
     settings: EEGSettings
         settings
-    montage: montage
-        EEG montage
     res: tuple[str]
         specify raw epochs/spectra features or both. for saving on disc choose default value
     save: bool
@@ -76,7 +120,7 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
     """
     if len(res) != 2 and save:
         raise ValueError('Please, use default res attribute')
-    if save_names != 'default' and len(save_names) != 4 and save:
+    if (save_names != 'default' and len(save_names) != 4) and save:
         raise ValueError('Please, specify all files names - for epochs, spectra features, mean spectra features and '
                          'ch_names')
     if save_names == 'default':
@@ -87,50 +131,26 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         save_dict = save_names
     subj_list_mean_spectra, subj_list_features, e_list, l_res, res_names, s, chan_names, info = \
         [], [], [], [], [], 0, None, None
+    result = {}
     n_subj = len(settings.files)
     for subj_paths, s_ind in tqdm(zip(settings.files.values(), settings.files.keys()), total=n_subj,
                                   desc=f'Creation of dataset for {n_subj} subjects', position=0):
         paths, epochs_list = subj_paths, []
-        for event_ind in settings.events:
-            j = 0
-            epochs = None
-            for i in [x for x in paths if '{0}'.format(event_ind) in x]:
-                event_id = dict(a=event_ind)
-                raw = mne.io.read_raw_edf(i, verbose='ERROR')
-                if len(raw.times) // 500 < 10:
-                    continue
-                new_events = mne.make_fixed_length_events(raw, id=event_ind, start=5, duration=2, overlap=0)
-                if j == 1:
-                    epochs = mne.concatenate_epochs([mne.Epochs(raw, new_events, event_id=event_id, tmin=0,
-                                                                tmax=2, baseline=None, flat=dict(eeg=1e-20),
-                                                                preload=True, verbose='ERROR'), epochs],
-                                                    verbose='ERROR')
-                else:
-                    epochs = mne.Epochs(raw, new_events, event_id=event_id, tmin=0, tmax=2, baseline=None,
-                                        flat=dict(eeg=1e-20), preload=True, verbose='ERROR')
-                    j += 1
-            if epochs is not None:
-                epochs_list.append(epochs.copy())
-        if not epochs_list:
-            raise ValueError(f'{s_ind} subject data is too short to be processed. please check files manually')
-        for epoch in range(len(epochs_list)):
-            new_names = dict(
-                (ch_name,
-                 ch_name.replace('-', '').replace('Chan ', 'E').replace('CAR', '').replace('EEG ', '')
-                 .replace('CA', '').replace(' ', ''))
-                for ch_name in epochs_list[epoch].ch_names)
-            epochs_list[epoch].rename_channels(new_names, verbose='ERROR').set_montage(montage, verbose='ERROR'). \
-                drop_channels(settings.channels_to_drop)
-            if s == 0:
-                chan_names = epochs_list[0].ch_names
-                info = mne.create_info(epochs_list[0].info.ch_names, ch_types='eeg', sfreq=250).set_montage(montage)
-                s += 1
+        if s == 0:
+            info = True
+            s += 1
+        results = subj_proc(settings, paths, s_ind, info=info)
+        for name in res:
+            if name == '':
+                pass
+        s += 1
         if 'raw_epochs' in res:
             e_list.append(epochs_list)
-        if 'spectra_feat' in res:
+ n        if 'spectra_feat' in res:
             feat_list, tabl_list = eeg_power_band(epochs_list, settings.fr_bands)
             subj_list_mean_spectra.append(tabl_list)
             subj_list_features.append(feat_list)
+
     if 'raw_epochs' in res:
         l_res.append(e_list)
         res_names.append('raw_epochs')
@@ -150,6 +170,27 @@ def create_dataset(settings, montage, res=('raw_epochs', 'spectra_feat'), save=T
         return dict(zip(res_names, l_res))
 
 
+def estimate_features(data, feat, n_jobs):
+    cfg = ''
+    condition = ''
+    subjects = []
+    for i in feat:
+        if i == 'spectra':
+            features = Parallel(n_jobs=n_jobs)(
+                delayed(eeg_power_band)(sub, cfg=cfg,
+                                        condition=condition) for sub in subjects)
+            out_fname = ''
+        elif i == 'cov':
+            pass
+        else:
+            raise ValueError
+        h5io.write_hdf5(
+            out_fname,
+            features,
+            overwrite=True
+        )
+
+
 def load_data(load_names):
     """
     function for load files
@@ -164,19 +205,19 @@ def load_data(load_names):
     :return: dictionary with files
     """
     result = dict()
-    for name in tqdm(load_names, desc='Loading of files', total=len(load_names)):
+    for name in tqdm(load_names, desc='Loading files', total=len(load_names)):
         with open(f'preprocessed_data/{name}.pkl', 'rb') as file:
             result[name] = pickle.load(file)
     return result
 
 
-def predict_lm(data, eeg_param, ps=None):
+def predict_lm(data: list[np.ndarray], eeg_param: list[dict, list], ps=None) -> tuple:
     """
-    function for logistic regression model
+    Function for fitting logistic regression model
     Parameters
     ----------
     data: list[np.ndarray]
-    eeg_param: list[dict, list]
+    eeg_param:
        [fr_bands, channels_names]
     
     Returns
@@ -316,7 +357,7 @@ def plot_feature_importance(data, eeg_param, subfig=None):
     subfig
     Returns
     -------   
-    figure     
+    figure
     """
     vmin, vmax, min_max, s, ret, fig = 0, 1, [], data[0].shape, False, None
     if subfig is None:
