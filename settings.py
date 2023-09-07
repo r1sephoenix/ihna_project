@@ -14,7 +14,7 @@ class EEGSettings:
         channels_to_drop: channels to drop
         montage_name: name of EEG cap montage
         events: events codes
-        fr_bands: frequency bands for estimation of features
+          fr_bands: frequency bands for estimation of features
         dict_cls: indexes for pairwise classification
         order_codes: ordered codes for all subjects
         mat_codes: codes for mat group
