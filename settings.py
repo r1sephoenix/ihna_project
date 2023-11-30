@@ -8,7 +8,7 @@ from typing import List, Dict
 @dataclass
 class EEGSettings:
     """
-    Settings for EEGs pre- and post-processing
+    Settings for EEGs pre-and post-processing
 
     Constructor fields:
         channels_to_drop: channels to drop

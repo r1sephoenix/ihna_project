@@ -7,8 +7,6 @@ from scipy.linalg import eigh
 from sklearn.base import BaseEstimator, TransformerMixin
 from pyriemann.utils.tangentspace import tangent_space, untangent_space
 import numpy as np
-import pandas as pd
-from mne import EvokedArray
 from scipy.linalg import eigh, pinv
 from sklearn.base import BaseEstimator, TransformerMixin
 
