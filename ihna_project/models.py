@@ -1,4 +1,4 @@
-  from sklearn.metrics import balanced_accuracy_score, roc_curve
+from sklearn.metrics import balanced_accuracy_score, roc_curve
 from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import StandardScaler
 
@@ -10,7 +10,6 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
-from transformers import PCS
 
 importlib.reload(transformers)
 CSP = transformers.CSP

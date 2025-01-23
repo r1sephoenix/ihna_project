@@ -1,5 +1,4 @@
 # changed transformers from https://github.com/pyRiemann/pyRiemann/blob/master/pyriemann/spatialfilters.py
-# for cross validation purposes
 import numpy as np
 from pyriemann.utils.ajd import ajd_pham
 from pyriemann.utils.mean import mean_covariance, _check_mean_method

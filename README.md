@@ -21,7 +21,7 @@ With the help of these tools, the following projects were carried out:
 
 ##### Classification of mathematicians from the humanities based on the oscillatory activity of the EEG
 
-[Notebook](ihna_classification_mat_versus_hum_tasks.ipynb)
+[Notebook](notebooks/ihna_classification_mat_versus_hum_tasks.ipynb)
 
 ###### Accuracy
 
@@ -39,13 +39,13 @@ With the help of these tools, the following projects were carried out:
 
 ##### Classification of mathematicians from the humanitarians, resting state(Eyes open)
 
-[Notebook](ihna_classification_mat_versus_hum_resting_state.ipynb)
+[Notebook](notebooks/ihna_classification_mat_versus_hum_resting_state.ipynb)
 
 <a name="link3"/>
 
 ##### Prediction of children age using patterns of auditory ERPs of varying intensity
 
-[Notebook](ihna_age_prediction.ipynb)
+[Notebook](notebooks/ihna_age_prediction.ipynb)
 
 <a name="link4"/>
 
