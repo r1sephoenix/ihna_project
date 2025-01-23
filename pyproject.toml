@@ -1,0 +1,24 @@
+[project]
+name = "ihna-project"
+version = "0.1.0"
+description = "Project for working with EEG and MEG"
+authors = [
+    {name = "Ilia Mikheev"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "scikit-learn (>=1.6.1,<2.0.0)",
+    "tqdm (>=4.67.1,<5.0.0)",
+    "mne (>=1.9.0,<2.0.0)",
+    "pyriemann (>=0.7,<0.8)",
+    "h5io (>=0.2.4,<0.3.0)",
+    "lightgbm (>=4.5.0,<5.0.0)",
+    "black (>=24.10.0,<25.0.0)",
+    "pydentic (>=0.0.1.dev3,<0.0.2)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
